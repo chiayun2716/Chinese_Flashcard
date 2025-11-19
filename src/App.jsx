@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, Filter, RotateCw, CheckCircle, LogIn, LogOut, Upload, X } from 'lucide-react';
+import { Volume2, Filter, RotateCw, CheckCircle, LogIn, LogOut, Upload, X, Settings, Plus, Trash2 } from 'lucide-react';
 import { auth, db, storage } from './firebase';
 import { 
   signInWithPopup,
@@ -31,12 +31,14 @@ const ChineseFlashcard = () => {
   });
   const [cardLevels, setCardLevels] = useState({});
   const [customImages, setCustomImages] = useState({});
+  const [customCards, setCustomCards] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
+  const [showCardManager, setShowCardManager] = useState(false);
 
-  const allCards = [
+  const defaultCards = [
     // 動物類 - 圖片
     { word: '貓', type: 'image', image: '🐱', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-500', level: 5 },
     { word: '狗', type: 'image', image: '🐶', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 5 },
@@ -223,6 +225,9 @@ const ChineseFlashcard = () => {
     { word: '蓁', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 0 },
   ];
 
+  // 合併預設字卡和自訂字卡
+  const allCards = [...defaultCards, ...customCards];
+
   // Firebase Auth 監聽
   useEffect(() => {
     // 檢查是否有 redirect 登入結果
@@ -233,12 +238,16 @@ const ChineseFlashcard = () => {
           // Redirect 登入成功，同步 localStorage 資料
           const localLevels = localStorage.getItem('cardLevels');
           const localImages = localStorage.getItem('customImages');
+          const localCards = localStorage.getItem('customCards');
           
           if (localLevels) {
             await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
           }
           if (localImages) {
             await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+          }
+          if (localCards) {
+            await setDoc(doc(db, 'users', result.user.uid, 'data', 'customCards'), { cards: JSON.parse(localCards) });
           }
         }
       } catch (error) {
@@ -272,6 +281,11 @@ const ChineseFlashcard = () => {
       if (imagesDoc.exists()) {
         setCustomImages(imagesDoc.data());
       }
+
+      const cardsDoc = await getDoc(doc(db, 'users', userId, 'data', 'customCards'));
+      if (cardsDoc.exists()) {
+        setCustomCards(cardsDoc.data().cards || []);
+      }
     } catch (error) {
       console.error('載入使用者資料失敗:', error);
     }
@@ -286,6 +300,10 @@ const ChineseFlashcard = () => {
     const savedImages = localStorage.getItem('customImages');
     if (savedImages) {
       setCustomImages(JSON.parse(savedImages));
+    }
+    const savedCards = localStorage.getItem('customCards');
+    if (savedCards) {
+      setCustomCards(JSON.parse(savedCards));
     }
   };
 
@@ -322,12 +340,16 @@ const ChineseFlashcard = () => {
         
         const localLevels = localStorage.getItem('cardLevels');
         const localImages = localStorage.getItem('customImages');
+        const localCards = localStorage.getItem('customCards');
         
         if (localLevels) {
           await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
         }
         if (localImages) {
           await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+        }
+        if (localCards) {
+          await setDoc(doc(db, 'users', result.user.uid, 'data', 'customCards'), { cards: JSON.parse(localCards) });
         }
       }
     } catch (error) {
@@ -437,6 +459,73 @@ const ChineseFlashcard = () => {
       alert('圖片上傳失敗，請稍後再試');
     } finally {
       setUploading(false);
+    }
+  };
+
+  // 新增自訂字卡
+  const addCustomCard = async (word, type = 'abstract') => {
+    if (allCards.some(card => card.word === word)) {
+      alert('此字卡已存在！');
+      return;
+    }
+
+    const colors = [
+      { color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500' },
+      { color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-500' },
+      { color: 'from-sky-50 to-cyan-50', accent: 'bg-sky-500' },
+      { color: 'from-blue-50 to-indigo-50', accent: 'bg-blue-500' },
+      { color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500' },
+      { color: 'from-green-50 to-emerald-50', accent: 'bg-green-500' },
+      { color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500' },
+    ];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    const newCard = {
+      word,
+      type,
+      image: type === 'image' ? '📝' : null,
+      ...randomColor,
+      level: 0,
+      custom: true,
+    };
+
+    const updatedCards = [...customCards, newCard];
+    setCustomCards(updatedCards);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'data', 'customCards'), { cards: updatedCards });
+        alert('字卡新增成功！');
+      } catch (error) {
+        console.error('儲存失敗:', error);
+        alert('儲存失敗，請稍後再試');
+      }
+    } else {
+      localStorage.setItem('customCards', JSON.stringify(updatedCards));
+      alert('字卡新增成功！（未登入，僅儲存在本機）');
+    }
+  };
+
+  // 刪除自訂字卡
+  const deleteCustomCard = async (word) => {
+    if (!window.confirm(`確定要刪除「${word}」嗎？`)) {
+      return;
+    }
+
+    const updatedCards = customCards.filter(card => card.word !== word);
+    setCustomCards(updatedCards);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'data', 'customCards'), { cards: updatedCards });
+        alert('字卡已刪除！');
+      } catch (error) {
+        console.error('刪除失敗:', error);
+        alert('刪除失敗，請稍後再試');
+      }
+    } else {
+      localStorage.setItem('customCards', JSON.stringify(updatedCards));
+      alert('字卡已刪除！');
     }
   };
 
@@ -687,6 +776,119 @@ const ChineseFlashcard = () => {
     );
   };
 
+  const CardManagerModal = () => {
+    const [newWord, setNewWord] = useState('');
+    const [newType, setNewType] = useState('abstract');
+
+    const handleAddCard = () => {
+      if (!newWord.trim()) {
+        alert('請輸入文字');
+        return;
+      }
+      addCustomCard(newWord.trim(), newType);
+      setNewWord('');
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 overflow-y-auto" onClick={() => setShowCardManager(false)}>
+        <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-2xl font-bold text-slate-800">字卡管理</h3>
+            <button onClick={() => setShowCardManager(false)} className="text-slate-400 hover:text-slate-600">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="text-lg font-bold text-blue-800 mb-4">➕ 新增字卡</div>
+            <div className="flex gap-3 mb-3">
+              <input
+                type="text"
+                value={newWord}
+                onChange={(e) => setNewWord(e.target.value)}
+                placeholder="輸入文字（例如：你、好）"
+                className="flex-1 p-3 border-2 border-slate-200 rounded-xl"
+                maxLength="2"
+              />
+              <select
+                value={newType}
+                onChange={(e) => setNewType(e.target.value)}
+                className="p-3 border-2 border-slate-200 rounded-xl"
+              >
+                <option value="abstract">抽象字</option>
+                <option value="image">圖片字</option>
+              </select>
+              <button
+                onClick={handleAddCard}
+                className="bg-blue-500 text-white font-bold px-6 rounded-xl hover:bg-blue-600 transition-all flex items-center gap-2"
+              >
+                <Plus size={20} />
+                新增
+              </button>
+            </div>
+            <div className="text-xs text-blue-600">
+              💡 提示：新增後，字卡會自動加入學習清單。圖片字可以在複習時上傳圖片。
+            </div>
+          </div>
+
+          <div className="mb-4 p-4 bg-green-50 rounded-xl border border-green-200">
+            <div className="text-sm text-green-800">
+              <span className="font-bold">預設字卡：</span>{defaultCards.length} 張
+            </div>
+            <div className="text-sm text-green-800">
+              <span className="font-bold">自訂字卡：</span>{customCards.length} 張
+            </div>
+            <div className="text-sm text-green-700 font-bold">
+              <span>總計：</span>{allCards.length} 張
+            </div>
+          </div>
+
+          {customCards.length > 0 && (
+            <div className="mb-4">
+              <div className="text-lg font-bold text-slate-800 mb-3">📝 你的自訂字卡</div>
+              <div className="max-h-96 overflow-y-auto space-y-2">
+                {customCards.map((card) => (
+                  <div key={card.word} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-3">
+                      <div className={`text-3xl font-bold bg-gradient-to-br ${card.color} px-4 py-2 rounded-xl`}>
+                        {card.word}
+                      </div>
+                      <div className="text-sm text-slate-600">
+                        {card.type === 'image' ? '🖼️ 圖片字' : '📄 抽象字'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteCustomCard(card.word)}
+                      className="bg-red-100 hover:bg-red-200 text-red-600 font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+                    >
+                      <Trash2 size={16} />
+                      刪除
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {customCards.length === 0 && (
+            <div className="text-center text-slate-400 py-8">
+              還沒有自訂字卡，快新增第一張吧！
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={() => setShowCardManager(false)}
+              className="flex-1 bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl hover:bg-slate-300 transition-all"
+            >
+              關閉
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center">
@@ -777,6 +979,16 @@ const ChineseFlashcard = () => {
             </select>
           </div>
 
+          <div className="mb-6">
+            <button 
+              onClick={() => setShowCardManager(true)}
+              className="w-full bg-gradient-to-r from-purple-400 to-fuchsia-400 hover:from-purple-500 hover:to-fuchsia-500 text-white text-lg font-bold py-4 px-6 rounded-2xl shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-3"
+            >
+              <Settings size={24} />
+              <span>管理字卡</span>
+            </button>
+          </div>
+
           <div className="space-y-3">
             <button onClick={() => startStudy(false)} className="w-full bg-gradient-to-r from-rose-400 to-pink-400 hover:from-rose-500 hover:to-pink-500 text-white text-xl font-bold py-5 px-8 rounded-2xl shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-3">
               <span className="text-2xl">📚</span>
@@ -809,6 +1021,7 @@ const ChineseFlashcard = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center p-6">
         {showImageUpload && <ImageUploadModal />}
+        {showCardManager && <CardManagerModal />}
         
         <div className="max-w-3xl w-full">
           <div className="flex justify-between items-center mb-6">

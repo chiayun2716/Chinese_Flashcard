@@ -37,6 +37,7 @@ const ChineseFlashcard = () => {
   const [uploading, setUploading] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [showCardManager, setShowCardManager] = useState(false);
+  const [showLevelCards, setShowLevelCards] = useState(null);
 
   const defaultCards = [
     // 動物類 - 圖片
@@ -917,6 +918,81 @@ const ChineseFlashcard = () => {
     );
   };
 
+  const LevelCardsModal = () => {
+    if (showLevelCards === null) return null;
+    
+    const levelCards = allCards.filter(card => getCardLevel(card.word) === showLevelCards);
+    
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 overflow-y-auto" onClick={() => setShowLevelCards(null)}>
+        <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-2xl font-bold text-slate-800">Level {showLevelCards} 字卡清單</h3>
+            <button onClick={() => setShowLevelCards(null)} className="text-slate-400 hover:text-slate-600">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="text-sm text-blue-800">
+              <span className="font-bold">共 {levelCards.length} 張字卡</span>
+            </div>
+          </div>
+
+          {levelCards.length > 0 ? (
+            <div className="max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-4 gap-3">
+                {levelCards.map((card) => (
+                  <div key={card.word} className={`bg-gradient-to-br ${card.color} rounded-xl p-4 text-center border-2 border-white shadow-lg hover:shadow-xl transition-all hover:scale-105 cursor-pointer`}>
+                    <div className="text-4xl font-black text-slate-800 mb-1" style={card.type === 'abstract' ? getFontStyle() : {}}>
+                      {card.type === 'image' && card.image ? (
+                        customImages[card.word] ? (
+                          <img src={customImages[card.word]} alt={card.word} className="w-full h-16 object-contain mb-2" />
+                        ) : (
+                          <div className="text-5xl">{card.image}</div>
+                        )
+                      ) : (
+                        card.word
+                      )}
+                    </div>
+                    {card.type === 'abstract' && (
+                      <div className="text-2xl font-bold text-slate-700">{card.word}</div>
+                    )}
+                    {card.custom && (
+                      <div className="text-xs text-purple-600 font-bold mt-1">自訂</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center text-slate-400 py-12">
+              這個熟悉度等級還沒有字卡
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={() => setShowLevelCards(null)}
+              className="flex-1 bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl hover:bg-slate-300 transition-all"
+            >
+              關閉
+            </button>
+            <button
+              onClick={() => {
+                setFilterLevel(showLevelCards.toString());
+                setShowLevelCards(null);
+              }}
+              className="flex-1 bg-blue-500 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-600 transition-all"
+            >
+              複習這些字卡
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center">
@@ -934,6 +1010,7 @@ const ChineseFlashcard = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center p-6">
         {showCardManager && <CardManagerModal />}
+        {showLevelCards !== null && <LevelCardsModal />}
         <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-12 max-w-lg w-full">
           <div className="mb-6 flex justify-between items-center">
             {user ? (
@@ -968,13 +1045,17 @@ const ChineseFlashcard = () => {
           </div>
 
           <div className="mb-6">
-            <div className="text-sm font-semibold text-slate-700 mb-3">熟悉度統計</div>
+            <div className="text-sm font-semibold text-slate-700 mb-3">熟悉度統計（點擊查看字卡）</div>
             <div className="grid grid-cols-3 gap-2">
               {[0, 1, 2, 3, 4, 5].map(level => (
-                <div key={level} className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-3 text-center border border-blue-100">
+                <button 
+                  key={level} 
+                  onClick={() => setShowLevelCards(level)}
+                  className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-3 text-center border border-blue-100 hover:shadow-lg hover:scale-105 transition-all cursor-pointer"
+                >
                   <div className="text-xs text-slate-600 font-medium">Level {level}</div>
                   <div className="text-2xl font-black text-blue-600">{levelCounts[level]}</div>
-                </div>
+                </button>
               ))}
             </div>
           </div>

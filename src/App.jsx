@@ -446,18 +446,43 @@ const ChineseFlashcard = () => {
 
   const getFontStyle = () => {
     if (fontFamily === 'kai') {
-      return { fontFamily: 'DFKai-SB, BiauKai, "標楷體", KaiTi, STKaiti, "AR PL UKai CN", "AR PL UKai HK", "AR PL UKai TW", "AR PL UKai TW MBE", serif' };
+      return { 
+        fontFamily: "'Noto Serif TC', 'DFKai-SB', 'BiauKai', '標楷體', 'KaiTi', 'STKaiti', 'Kaiti SC', 'AR PL UKai CN', 'AR PL UKai HK', 'AR PL UKai TW', 'AR PL UKai TW MBE', serif",
+        fontWeight: 400
+      };
     }
     return {};
   };
 
   const playSound = (text) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-TW';
-    utterance.rate = 0.4;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    speechSynthesis.speak(utterance);
+    try {
+      // 停止之前的語音
+      speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'zh-TW';
+      utterance.rate = 0.4;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      // iOS Safari 特殊處理
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        // iOS 需要稍微延遲以確保語音引擎準備好
+        setTimeout(() => {
+          speechSynthesis.speak(utterance);
+        }, 100);
+      } else {
+        speechSynthesis.speak(utterance);
+      }
+      
+      // 錯誤處理
+      utterance.onerror = (event) => {
+        console.error('語音播放錯誤:', event);
+      };
+    } catch (error) {
+      console.error('語音播放失敗:', error);
+      // 不顯示錯誤訊息給使用者，靜默失敗
+    }
   };
 
   const shuffleArray = (array) => {

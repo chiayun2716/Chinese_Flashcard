@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Volume2, Filter, RotateCw, CheckCircle, LogIn, LogOut, Upload, X } from 'lucide-react';
 import { auth, db, storage } from './firebase';
 import { 
-  signInWithPopup, 
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider, 
   signOut as firebaseSignOut 
 } from 'firebase/auth';
@@ -223,6 +225,29 @@ const ChineseFlashcard = () => {
 
   // Firebase Auth 監聽
   useEffect(() => {
+    // 檢查是否有 redirect 登入結果
+    const checkRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result && result.user) {
+          // Redirect 登入成功，同步 localStorage 資料
+          const localLevels = localStorage.getItem('cardLevels');
+          const localImages = localStorage.getItem('customImages');
+          
+          if (localLevels) {
+            await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
+          }
+          if (localImages) {
+            await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+          }
+        }
+      } catch (error) {
+        console.error('處理 redirect 結果失敗:', error);
+      }
+    };
+
+    checkRedirectResult();
+
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -284,16 +309,26 @@ const ChineseFlashcard = () => {
   const handleGoogleSignIn = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      const result = await signInWithPopup(auth, provider);
+      // 偵測是否為手機裝置
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
-      const localLevels = localStorage.getItem('cardLevels');
-      const localImages = localStorage.getItem('customImages');
-      
-      if (localLevels) {
-        await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
-      }
-      if (localImages) {
-        await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+      if (isMobile) {
+        // 手機使用 redirect 模式（更穩定）
+        await signInWithRedirect(auth, provider);
+        // Redirect 會自動跳轉，結果在頁面重新載入後處理
+      } else {
+        // 電腦使用 popup 模式
+        const result = await signInWithPopup(auth, provider);
+        
+        const localLevels = localStorage.getItem('cardLevels');
+        const localImages = localStorage.getItem('customImages');
+        
+        if (localLevels) {
+          await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
+        }
+        if (localImages) {
+          await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+        }
       }
     } catch (error) {
       console.error('登入失敗:', error);

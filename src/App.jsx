@@ -1,4 +1,40 @@
-const allCards = [
+import React, { useState, useEffect } from 'react';
+import { Volume2, Filter, RotateCw, CheckCircle, LogIn, LogOut, Upload, X } from 'lucide-react';
+import { auth, db, storage } from './firebase';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut as firebaseSignOut 
+} from 'firebase/auth';
+import { 
+  doc, 
+  getDoc, 
+  setDoc 
+} from 'firebase/firestore';
+import { 
+  ref, 
+  uploadBytes, 
+  getDownloadURL 
+} from 'firebase/storage';
+
+const ChineseFlashcard = () => {
+  const [mode, setMode] = useState('menu');
+  const [currentCard, setCurrentCard] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [shuffledCards, setShuffledCards] = useState([]);
+  const [filterLevel, setFilterLevel] = useState('all');
+  const [studiedToday, setStudiedToday] = useState(new Set());
+  const [fontFamily, setFontFamily] = useState(() => {
+    return localStorage.getItem('fontFamily') || 'default';
+  });
+  const [cardLevels, setCardLevels] = useState({});
+  const [customImages, setCustomImages] = useState({});
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [showImageUpload, setShowImageUpload] = useState(false);
+
+  const allCards = [
     // 動物類 - 圖片
     { word: '貓', type: 'image', image: '🐱', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-500', level: 5 },
     { word: '狗', type: 'image', image: '🐶', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 5 },
@@ -183,154 +219,136 @@ const allCards = [
     { word: '趴', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-400', level: 0 },
     { word: '宛', type: 'abstract', color: 'from-purple-50 to-pink-50', accent: 'bg-purple-400', level: 0 },
     { word: '蓁', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 0 },
-  ];import React, { useState, useEffect } from 'react';
-import { Volume2, Filter, RotateCw, CheckCircle } from 'lucide-react';
+  ];
 
-const ChineseFlashcard = () => {
-  const [mode, setMode] = useState('menu');
-  const [currentCard, setCurrentCard] = useState(0);
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [shuffledCards, setShuffledCards] = useState([]);
-  const [filterLevel, setFilterLevel] = useState('all');
-  const [studiedToday, setStudiedToday] = useState(new Set());
-  const [fontFamily, setFontFamily] = useState(() => {
-    return localStorage.getItem('fontFamily') || 'default';
-  });
-  const [cardLevels, setCardLevels] = useState(() => {
-    const saved = localStorage.getItem('cardLevels');
-    return saved ? JSON.parse(saved) : {};
-  });
-  
-  // 保存字體設定到 localStorage
+  // Firebase Auth 監聽
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        await loadUserData(currentUser.uid);
+      } else {
+        loadLocalData();
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 從 Firestore 載入資料
+  const loadUserData = async (userId) => {
+    try {
+      const levelsDoc = await getDoc(doc(db, 'users', userId, 'data', 'cardLevels'));
+      if (levelsDoc.exists()) {
+        setCardLevels(levelsDoc.data());
+      }
+
+      const imagesDoc = await getDoc(doc(db, 'users', userId, 'data', 'customImages'));
+      if (imagesDoc.exists()) {
+        setCustomImages(imagesDoc.data());
+      }
+    } catch (error) {
+      console.error('載入使用者資料失敗:', error);
+    }
+  };
+
+  // 從 localStorage 載入資料
+  const loadLocalData = () => {
+    const savedLevels = localStorage.getItem('cardLevels');
+    if (savedLevels) {
+      setCardLevels(JSON.parse(savedLevels));
+    }
+    const savedImages = localStorage.getItem('customImages');
+    if (savedImages) {
+      setCustomImages(JSON.parse(savedImages));
+    }
+  };
+
+  // 保存熟悉度
+  const saveCardLevel = async (word, level) => {
+    const newLevels = { ...cardLevels, [word]: level };
+    setCardLevels(newLevels);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'data', 'cardLevels'), newLevels);
+      } catch (error) {
+        console.error('儲存到 Firestore 失敗:', error);
+      }
+    } else {
+      localStorage.setItem('cardLevels', JSON.stringify(newLevels));
+    }
+  };
+
+  // Google 登入
+  const handleGoogleSignIn = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(auth, provider);
+      
+      const localLevels = localStorage.getItem('cardLevels');
+      const localImages = localStorage.getItem('customImages');
+      
+      if (localLevels) {
+        await setDoc(doc(db, 'users', result.user.uid, 'data', 'cardLevels'), JSON.parse(localLevels));
+      }
+      if (localImages) {
+        await setDoc(doc(db, 'users', result.user.uid, 'data', 'customImages'), JSON.parse(localImages));
+      }
+    } catch (error) {
+      console.error('登入失敗:', error);
+      alert('登入失敗，請稍後再試');
+    }
+  };
+
+  // 登出
+  const handleSignOut = async () => {
+    try {
+      await firebaseSignOut(auth);
+      setCardLevels({});
+      setCustomImages({});
+      loadLocalData();
+    } catch (error) {
+      console.error('登出失敗:', error);
+    }
+  };
+
+  // 上傳圖片
+  const handleImageUpload = async (word, file) => {
+    if (!user) {
+      alert('請先登入才能上傳圖片');
+      return;
+    }
+
+    if (!file || !file.type.startsWith('image/')) {
+      alert('請選擇有效的圖片檔案');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const storageRef = ref(storage, `users/${user.uid}/images/${word}.jpg`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+
+      const newImages = { ...customImages, [word]: downloadURL };
+      setCustomImages(newImages);
+
+      await setDoc(doc(db, 'users', user.uid, 'data', 'customImages'), newImages);
+
+      setShowImageUpload(false);
+      alert('圖片上傳成功！');
+    } catch (error) {
+      console.error('圖片上傳失敗:', error);
+      alert('圖片上傳失敗，請稍後再試');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   useEffect(() => {
     localStorage.setItem('fontFamily', fontFamily);
   }, [fontFamily]);
-  
-  // 保存熟悉度到 localStorage
-  useEffect(() => {
-    localStorage.setItem('cardLevels', JSON.stringify(cardLevels));
-  }, [cardLevels]);
-  
-  const allCards = [
-    { word: '貓', type: 'image', image: '🐱', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-500', level: 5 },
-    { word: '狗', type: 'image', image: '🐶', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 3 },
-    { word: '魚', type: 'image', image: '🐟', color: 'from-cyan-50 to-teal-50', accent: 'bg-cyan-500', level: 5 },
-    { word: '鳥', type: 'image', image: '🐦', color: 'from-sky-50 to-indigo-50', accent: 'bg-sky-500', level: 5 },
-    { word: '雞', type: 'image', image: '🐔', color: 'from-yellow-50 to-amber-50', accent: 'bg-yellow-500', level: 3 },
-    { word: '鴨', type: 'image', image: '🦆', color: 'from-blue-50 to-sky-50', accent: 'bg-blue-400', level: 5 },
-    { word: '豬', type: 'image', image: '🐷', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-400', level: 5 },
-    { word: '牛', type: 'image', image: '🐮', color: 'from-amber-50 to-yellow-50', accent: 'bg-amber-600', level: 5 },
-    { word: '馬', type: 'image', image: '🐴', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500', level: 3 },
-    { word: '羊', type: 'image', image: '🐑', color: 'from-slate-50 to-gray-50', accent: 'bg-slate-400', level: 5 },
-    { word: '熊', type: 'image', image: '🐻', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-700', level: 5 },
-    { word: '虎', type: 'image', image: '🐯', color: 'from-orange-50 to-red-50', accent: 'bg-orange-600', level: 5 },
-    { word: '獅', type: 'image', image: '🦁', color: 'from-yellow-50 to-orange-50', accent: 'bg-yellow-600', level: 5 },
-    { word: '象', type: 'image', image: '🐘', color: 'from-gray-50 to-slate-50', accent: 'bg-gray-500', level: 5 },
-    { word: '猴', type: 'image', image: '🐵', color: 'from-amber-50 to-yellow-50', accent: 'bg-amber-500', level: 5 },
-    { word: '鹿', type: 'image', image: '🦌', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-400', level: 5 },
-    { word: '兔', type: 'image', image: '🐰', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-400', level: 5 },
-    { word: '蛇', type: 'image', image: '🐍', color: 'from-green-50 to-emerald-50', accent: 'bg-green-600', level: 5 },
-    { word: '龜', type: 'image', image: '🐢', color: 'from-emerald-50 to-teal-50', accent: 'bg-emerald-600', level: 5 },
-    { word: '蝴', type: 'image', image: '🦋', color: 'from-purple-50 to-pink-50', accent: 'bg-purple-400', level: 5 },
-    { word: '蟲', type: 'image', image: '🐛', color: 'from-green-50 to-lime-50', accent: 'bg-green-500', level: 5 },
-    { word: '鵝', type: 'image', image: '🦢', color: 'from-slate-50 to-blue-50', accent: 'bg-slate-300', level: 5 },
-    { word: '蝦', type: 'image', image: '🦐', color: 'from-red-50 to-orange-50', accent: 'bg-red-400', level: 5 },
-    { word: '花', type: 'image', image: '🌸', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500', level: 2 },
-    { word: '樹', type: 'image', image: '🌳', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 5 },
-    { word: '草', type: 'image', image: '🌿', color: 'from-green-50 to-emerald-50', accent: 'bg-green-500', level: 3 },
-    { word: '木', type: 'image', image: '🪵', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-700', level: 3 },
-    { word: '書', type: 'image', image: '📚', color: 'from-blue-50 to-indigo-50', accent: 'bg-blue-500', level: 5 },
-    { word: '車', type: 'image', image: '🚗', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 3 },
-    { word: '門', type: 'image', image: '🚪', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-600', level: 3 },
-    { word: '船', type: 'image', image: '⛵', color: 'from-sky-50 to-blue-50', accent: 'bg-sky-500', level: 3 },
-    { word: '手', type: 'image', image: '✋', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-400', level: 3 },
-    { word: '星', type: 'image', image: '⭐', color: 'from-yellow-50 to-amber-50', accent: 'bg-yellow-500', level: 3 },
-    { word: '一', type: 'abstract', color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500', level: 5 },
-    { word: '二', type: 'abstract', color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-500', level: 2 },
-    { word: '大', type: 'abstract', color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-500', level: 5 },
-    { word: '上', type: 'abstract', color: 'from-sky-50 to-cyan-50', accent: 'bg-sky-500', level: 5 },
-    { word: '天', type: 'abstract', color: 'from-blue-50 to-indigo-50', accent: 'bg-blue-500', level: 5 },
-    { word: '好', type: 'abstract', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500', level: 5 },
-    { word: '可', type: 'abstract', color: 'from-purple-50 to-fuchsia-50', accent: 'bg-purple-500', level: 5 },
-    { word: '看', type: 'abstract', color: 'from-cyan-50 to-teal-50', accent: 'bg-cyan-500', level: 5 },
-    { word: '家', type: 'abstract', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500', level: 5 },
-    { word: '下', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 5 },
-    { word: '得', type: 'abstract', color: 'from-rose-50 to-pink-50', accent: 'bg-rose-500', level: 5 },
-    { word: '用', type: 'abstract', color: 'from-teal-50 to-cyan-50', accent: 'bg-teal-500', level: 5 },
-    { word: '成', type: 'abstract', color: 'from-amber-50 to-yellow-50', accent: 'bg-amber-500', level: 5 },
-    { word: '回', type: 'abstract', color: 'from-lime-50 to-green-50', accent: 'bg-lime-500', level: 5 },
-    { word: '開', type: 'abstract', color: 'from-fuchsia-50 to-pink-50', accent: 'bg-fuchsia-500', level: 5 },
-    { word: '做', type: 'abstract', color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500', level: 5 },
-    { word: '媽', type: 'abstract', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500', level: 5 },
-    { word: '什', type: 'abstract', color: 'from-cyan-50 to-sky-50', accent: 'bg-cyan-500', level: 5 },
-    { word: '面', type: 'abstract', color: 'from-yellow-50 to-amber-50', accent: 'bg-yellow-500', level: 5 },
-    { word: '想', type: 'abstract', color: 'from-indigo-50 to-violet-50', accent: 'bg-indigo-500', level: 5 },
-    { word: '自', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-500', level: 5 },
-    { word: '美', type: 'abstract', color: 'from-rose-50 to-pink-50', accent: 'bg-rose-500', level: 5 },
-    { word: '爸', type: 'abstract', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 5 },
-    { word: '沒', type: 'abstract', color: 'from-slate-50 to-gray-50', accent: 'bg-slate-500', level: 5 },
-    { word: '小', type: 'abstract', color: 'from-purple-50 to-fuchsia-50', accent: 'bg-purple-500', level: 5 },
-    { word: '愛', type: 'abstract', color: 'from-pink-50 to-red-50', accent: 'bg-pink-600', level: 5 },
-    { word: '吃', type: 'abstract', color: 'from-orange-50 to-red-50', accent: 'bg-orange-500', level: 5 },
-    { word: '難', type: 'abstract', color: 'from-gray-50 to-slate-50', accent: 'bg-gray-500', level: 5 },
-    { word: '的', type: 'abstract', color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500', level: 4 },
-    { word: '地', type: 'abstract', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-600', level: 4 },
-    { word: '年', type: 'abstract', color: 'from-red-50 to-orange-50', accent: 'bg-red-500', level: 4 },
-    { word: '會', type: 'abstract', color: 'from-blue-50 to-indigo-50', accent: 'bg-blue-500', level: 4 },
-    { word: '很', type: 'abstract', color: 'from-green-50 to-teal-50', accent: 'bg-green-500', level: 4 },
-    { word: '以', type: 'abstract', color: 'from-purple-50 to-pink-50', accent: 'bg-purple-500', level: 4 },
-    { word: '說', type: 'abstract', color: 'from-cyan-50 to-blue-50', accent: 'bg-cyan-500', level: 4 },
-    { word: '這', type: 'abstract', color: 'from-rose-50 to-pink-50', accent: 'bg-rose-500', level: 4 },
-    { word: '那', type: 'abstract', color: 'from-indigo-50 to-purple-50', accent: 'bg-indigo-500', level: 4 },
-    { word: '東', type: 'abstract', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500', level: 4 },
-    { word: '西', type: 'abstract', color: 'from-yellow-50 to-orange-50', accent: 'bg-yellow-500', level: 4 },
-    { word: '高', type: 'abstract', color: 'from-sky-50 to-blue-50', accent: 'bg-sky-500', level: 4 },
-    { word: '現', type: 'abstract', color: 'from-teal-50 to-cyan-50', accent: 'bg-teal-500', level: 4 },
-    { word: '睡', type: 'abstract', color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-600', level: 4 },
-    { word: '課', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 4 },
-    { word: '起', type: 'abstract', color: 'from-lime-50 to-green-50', accent: 'bg-lime-600', level: 4 },
-    { word: '飯', type: 'abstract', color: 'from-orange-50 to-red-50', accent: 'bg-orange-600', level: 4 },
-    { word: '菜', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-600', level: 4 },
-    { word: '湯', type: 'abstract', color: 'from-amber-50 to-yellow-50', accent: 'bg-amber-500', level: 4 },
-    { word: '早', type: 'abstract', color: 'from-yellow-50 to-orange-50', accent: 'bg-yellow-600', level: 4 },
-    { word: '不', type: 'abstract', color: 'from-red-50 to-rose-50', accent: 'bg-red-500', level: 3 },
-    { word: '國', type: 'abstract', color: 'from-red-50 to-orange-50', accent: 'bg-red-600', level: 3 },
-    { word: '要', type: 'abstract', color: 'from-purple-50 to-fuchsia-50', accent: 'bg-purple-600', level: 3 },
-    { word: '出', type: 'abstract', color: 'from-blue-50 to-sky-50', accent: 'bg-blue-600', level: 3 },
-    { word: '生', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-600', level: 3 },
-    { word: '來', type: 'abstract', color: 'from-cyan-50 to-teal-50', accent: 'bg-cyan-600', level: 3 },
-    { word: '班', type: 'abstract', color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-600', level: 3 },
-    { word: '姐', type: 'abstract', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-600', level: 3 },
-    { word: '哥', type: 'abstract', color: 'from-blue-50 to-indigo-50', accent: 'bg-blue-700', level: 3 },
-    { word: '哭', type: 'abstract', color: 'from-slate-50 to-gray-50', accent: 'bg-slate-600', level: 3 },
-    { word: '肚', type: 'abstract', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-600', level: 3 },
-    { word: '了', type: 'abstract', color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500', level: 1 },
-    { word: '他', type: 'abstract', color: 'from-blue-50 to-cyan-50', accent: 'bg-blue-500', level: 1 },
-    { word: '她', type: 'abstract', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500', level: 1 },
-    { word: '哪', type: 'abstract', color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500', level: 1 },
-    { word: '去', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-500', level: 1 },
-    { word: '玩', type: 'abstract', color: 'from-purple-50 to-fuchsia-50', accent: 'bg-purple-500', level: 1 },
-    { word: '多', type: 'abstract', color: 'from-slate-50 to-gray-50', accent: 'bg-slate-500', level: 0 },
-    { word: '點', type: 'abstract', color: 'from-amber-50 to-yellow-50', accent: 'bg-amber-500', level: 0 },
-    { word: '等', type: 'abstract', color: 'from-cyan-50 to-teal-50', accent: 'bg-cyan-500', level: 0 },
-    { word: '再', type: 'abstract', color: 'from-indigo-50 to-blue-50', accent: 'bg-indigo-500', level: 0 },
-    { word: '少', type: 'abstract', color: 'from-rose-50 to-pink-50', accent: 'bg-rose-500', level: 0 },
-    { word: '隻', type: 'abstract', color: 'from-violet-50 to-purple-50', accent: 'bg-violet-500', level: 0 },
-    { word: '笑', type: 'abstract', color: 'from-yellow-50 to-orange-50', accent: 'bg-yellow-500', level: 0 },
-    { word: '建', type: 'abstract', color: 'from-blue-50 to-sky-50', accent: 'bg-blue-500', level: 0 },
-    { word: '跑', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-500', level: 0 },
-    { word: '呀', type: 'abstract', color: 'from-pink-50 to-rose-50', accent: 'bg-pink-500', level: 0 },
-    { word: '遊', type: 'abstract', color: 'from-cyan-50 to-blue-50', accent: 'bg-cyan-500', level: 0 },
-    { word: '腳', type: 'abstract', color: 'from-orange-50 to-red-50', accent: 'bg-orange-500', level: 0 },
-    { word: '怕', type: 'abstract', color: 'from-purple-50 to-fuchsia-50', accent: 'bg-purple-500', level: 0 },
-    { word: '啦', type: 'abstract', color: 'from-lime-50 to-green-50', accent: 'bg-lime-500', level: 0 },
-    { word: '閃', type: 'abstract', color: 'from-yellow-50 to-amber-50', accent: 'bg-yellow-600', level: 0 },
-    { word: '連', type: 'abstract', color: 'from-teal-50 to-cyan-50', accent: 'bg-teal-500', level: 0 },
-    { word: '都', type: 'abstract', color: 'from-indigo-50 to-purple-50', accent: 'bg-indigo-600', level: 0 },
-    { word: '找', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 0 },
-    { word: '叫', type: 'abstract', color: 'from-red-50 to-orange-50', accent: 'bg-red-500', level: 0 },
-    { word: '跳', type: 'abstract', color: 'from-fuchsia-50 to-pink-50', accent: 'bg-fuchsia-500', level: 0 },
-  ];
 
   const getFontStyle = () => {
     if (fontFamily === 'kai') {
@@ -352,9 +370,7 @@ const ChineseFlashcard = () => {
     const shuffled = [...array];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      const temp = shuffled[i];
-      shuffled[i] = shuffled[j];
-      shuffled[j] = temp;
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     return shuffled;
   };
@@ -367,11 +383,11 @@ const ChineseFlashcard = () => {
     return card ? card.level : 0;
   };
 
-  const setCardLevel = (word, level) => {
-    setCardLevels(prev => ({
-      ...prev,
-      [word]: level
-    }));
+  const getCardImage = (card) => {
+    if (customImages[card.word]) {
+      return customImages[card.word];
+    }
+    return card.image;
   };
 
   const getFilteredCards = () => {
@@ -382,7 +398,6 @@ const ChineseFlashcard = () => {
   const startStudy = (shuffle) => {
     let filtered = getFilteredCards();
     
-    // 如果是隨機複習，排除熟悉度0和5
     if (shuffle) {
       filtered = filtered.filter(card => {
         const level = getCardLevel(card.word);
@@ -398,9 +413,7 @@ const ChineseFlashcard = () => {
   };
 
   const markAsStudied = (word) => {
-    const newSet = new Set(studiedToday);
-    newSet.add(word);
-    setStudiedToday(newSet);
+    setStudiedToday(prev => new Set([...prev, word]));
   };
 
   const handleFlip = () => {
@@ -429,19 +442,39 @@ const ChineseFlashcard = () => {
       playSound(card.word);
     };
 
+    const handleUploadClick = (e) => {
+      stopProp(e);
+      setShowImageUpload(true);
+    };
+
+    const cardImage = getCardImage(card);
+    const isCustomImage = customImages[card.word];
+
     if (card.type === 'image') {
       return (
         <>
           <div className="relative flex-1 flex items-center justify-center">
             <div className={`absolute inset-0 ${card.accent} opacity-20 blur-3xl`}></div>
-            <div className="relative drop-shadow-2xl" style={{fontSize: '280px'}}>
-              {card.image}
-            </div>
+            {isCustomImage ? (
+              <img src={cardImage} alt={card.word} className="relative max-w-full max-h-full object-contain rounded-2xl shadow-2xl" style={{maxHeight: '350px'}} />
+            ) : (
+              <div className="relative drop-shadow-2xl" style={{fontSize: '280px'}}>
+                {cardImage}
+              </div>
+            )}
           </div>
-          <button onClick={handleSound} className="bg-white/90 backdrop-blur text-slate-700 font-bold py-4 px-8 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all flex items-center gap-3 text-xl border border-slate-200">
-            <Volume2 size={28} className="text-rose-500" />
-            <span>再聽一次</span>
-          </button>
+          <div className="flex gap-3">
+            <button onClick={handleSound} className="flex-1 bg-white/90 backdrop-blur text-slate-700 font-bold py-4 px-8 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all flex items-center justify-center gap-3 text-xl border border-slate-200">
+              <Volume2 size={28} className="text-rose-500" />
+              <span>再聽一次</span>
+            </button>
+            {user && (
+              <button onClick={handleUploadClick} className="bg-blue-500/90 backdrop-blur text-white font-bold py-4 px-8 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all flex items-center justify-center gap-3 text-xl">
+                <Upload size={24} />
+                <span>上傳圖片</span>
+              </button>
+            )}
+          </div>
         </>
       );
     } else {
@@ -462,6 +495,61 @@ const ChineseFlashcard = () => {
     }
   };
 
+  const ImageUploadModal = () => {
+    const card = shuffledCards[currentCard];
+    const [selectedFile, setSelectedFile] = useState(null);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6" onClick={() => setShowImageUpload(false)}>
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-2xl font-bold text-slate-800">上傳「{card.word}」的圖片</h3>
+            <button onClick={() => setShowImageUpload(false)} className="text-slate-400 hover:text-slate-600">
+              <X size={24} />
+            </button>
+          </div>
+
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setSelectedFile(e.target.files[0])}
+            className="w-full mb-4 p-3 border-2 border-slate-200 rounded-xl"
+          />
+
+          {selectedFile && (
+            <div className="mb-4">
+              <img src={URL.createObjectURL(selectedFile)} alt="預覽" className="w-full rounded-xl" />
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowImageUpload(false)}
+              className="flex-1 bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl hover:bg-slate-300 transition-all"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => selectedFile && handleImageUpload(card.word, selectedFile)}
+              disabled={!selectedFile || uploading}
+              className="flex-1 bg-blue-500 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {uploading ? '上傳中...' : '確認上傳'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center">
+        <div className="text-2xl font-bold text-slate-600">載入中...</div>
+      </div>
+    );
+  }
+
   if (mode === 'menu') {
     const todayCount = studiedToday.size;
     const levelCounts = [0, 1, 2, 3, 4, 5].map(level => 
@@ -471,6 +559,32 @@ const ChineseFlashcard = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center p-6">
         <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-12 max-w-lg w-full">
+          <div className="mb-6 flex justify-between items-center">
+            {user ? (
+              <div className="flex items-center gap-3">
+                <img src={user.photoURL} alt="Avatar" className="w-12 h-12 rounded-full border-2 border-rose-300" />
+                <div>
+                  <div className="font-bold text-slate-800">{user.displayName}</div>
+                  <div className="text-sm text-slate-500">已登入</div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-slate-600 font-medium">未登入（使用本機資料）</div>
+            )}
+            
+            {user ? (
+              <button onClick={handleSignOut} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-full transition-all flex items-center gap-2">
+                <LogOut size={18} />
+                <span>登出</span>
+              </button>
+            ) : (
+              <button onClick={handleGoogleSignIn} className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-full transition-all flex items-center gap-2">
+                <LogIn size={18} />
+                <span>Google 登入</span>
+              </button>
+            )}
+          </div>
+
           <div className="text-center mb-8">
             <div className="text-7xl mb-4">📖</div>
             <h1 className="text-5xl font-bold bg-gradient-to-r from-rose-500 to-pink-500 bg-clip-text text-transparent mb-3">中文字卡</h1>
@@ -549,6 +663,8 @@ const ChineseFlashcard = () => {
     
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center p-6">
+        {showImageUpload && <ImageUploadModal />}
+        
         <div className="max-w-3xl w-full">
           <div className="flex justify-between items-center mb-6">
             <button onClick={() => setMode('menu')} className="bg-white/80 backdrop-blur-xl text-slate-700 font-semibold py-3 px-6 rounded-full shadow-lg hover:shadow-xl transition-all border border-slate-200 flex items-center gap-2">
@@ -558,7 +674,11 @@ const ChineseFlashcard = () => {
 
             <div className="flex gap-2">
               {[0, 1, 2, 3, 4, 5].map(level => (
-                <button key={level} onClick={() => setCardLevel(card.word, level)} className={`font-bold py-2 px-4 rounded-full shadow-lg hover:shadow-xl transition-all border-2 ${currentLevel === level ? 'bg-rose-500 text-white border-rose-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
+                <button 
+                  key={level} 
+                  onClick={() => saveCardLevel(card.word, level)} 
+                  className={`font-bold py-2 px-4 rounded-full shadow-lg hover:shadow-xl transition-all border-2 ${currentLevel === level ? 'bg-rose-500 text-white border-rose-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                >
                   {level}
                 </button>
               ))}

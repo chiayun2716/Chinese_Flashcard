@@ -462,11 +462,14 @@ const ChineseFlashcard = () => {
     }
   };
 
-  // 新增自訂字卡
-  const addCustomCard = async (word, type = 'abstract') => {
-    if (allCards.some(card => card.word === word)) {
-      alert('此字卡已存在！');
-      return;
+  // 新增自訂字卡（支援批次）
+  const addCustomCard = async (words, type = 'abstract') => {
+    // 支援單字或多字（用空格、逗號、頓號分隔）
+    const wordList = words.split(/[\s,，、]+/).filter(w => w.trim());
+    
+    if (wordList.length === 0) {
+      alert('請輸入文字');
+      return { success: false, message: '請輸入文字' };
     }
 
     const colors = [
@@ -478,32 +481,56 @@ const ChineseFlashcard = () => {
       { color: 'from-green-50 to-emerald-50', accent: 'bg-green-500' },
       { color: 'from-orange-50 to-amber-50', accent: 'bg-orange-500' },
     ];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
-    const newCard = {
-      word,
-      type,
-      image: type === 'image' ? '📝' : null,
-      ...randomColor,
-      level: 0,
-      custom: true,
-    };
+    const newCards = [];
+    const existingWords = [];
+    const addedWords = [];
 
-    const updatedCards = [...customCards, newCard];
+    for (const word of wordList) {
+      if (allCards.some(card => card.word === word) || newCards.some(card => card.word === word)) {
+        existingWords.push(word);
+        continue;
+      }
+
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      newCards.push({
+        word,
+        type,
+        image: type === 'image' ? '📝' : null,
+        ...randomColor,
+        level: 0,
+        custom: true,
+      });
+      addedWords.push(word);
+    }
+
+    if (newCards.length === 0) {
+      const message = `全部字卡已存在：${existingWords.join('、')}`;
+      alert(message);
+      return { success: false, message, existingWords };
+    }
+
+    const updatedCards = [...customCards, ...newCards];
     setCustomCards(updatedCards);
 
     if (user) {
       try {
         await setDoc(doc(db, 'users', user.uid, 'data', 'customCards'), { cards: updatedCards });
-        alert('字卡新增成功！');
       } catch (error) {
         console.error('儲存失敗:', error);
         alert('儲存失敗，請稍後再試');
+        return { success: false, message: '儲存失敗' };
       }
     } else {
       localStorage.setItem('customCards', JSON.stringify(updatedCards));
-      alert('字卡新增成功！（未登入，僅儲存在本機）');
     }
+
+    let message = `成功新增 ${addedWords.length} 張字卡：${addedWords.join('、')}`;
+    if (existingWords.length > 0) {
+      message += `\n\n以下字卡已存在（略過）：${existingWords.join('、')}`;
+    }
+    alert(message);
+    return { success: true, message, addedWords, existingWords };
   };
 
   // 刪除自訂字卡
@@ -806,9 +833,8 @@ const ChineseFlashcard = () => {
                 type="text"
                 value={newWord}
                 onChange={(e) => setNewWord(e.target.value)}
-                placeholder="輸入文字（例如：你、好）"
+                placeholder="輸入文字（例如：你 好 嗎）"
                 className="flex-1 p-3 border-2 border-slate-200 rounded-xl"
-                maxLength="2"
               />
               <select
                 value={newType}
@@ -827,7 +853,9 @@ const ChineseFlashcard = () => {
               </button>
             </div>
             <div className="text-xs text-blue-600">
-              💡 提示：新增後，字卡會自動加入學習清單。圖片字可以在複習時上傳圖片。
+              💡 <strong>批次新增：</strong>可用空格、逗號分隔多個字，例如：「你 好 嗎」或「你,好,嗎」<br/>
+              💡 系統會自動檢查重複，已存在的字卡會被略過<br/>
+              💡 圖片字可以在複習時上傳圖片
             </div>
           </div>
 
@@ -905,6 +933,7 @@ const ChineseFlashcard = () => {
     
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 flex items-center justify-center p-6">
+        {showCardManager && <CardManagerModal />}
         <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-12 max-w-lg w-full">
           <div className="mb-6 flex justify-between items-center">
             {user ? (

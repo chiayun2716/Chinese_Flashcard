@@ -183,7 +183,7 @@ const allCards = [
     { word: '趴', type: 'abstract', color: 'from-green-50 to-emerald-50', accent: 'bg-green-400', level: 0 },
     { word: '宛', type: 'abstract', color: 'from-purple-50 to-pink-50', accent: 'bg-purple-400', level: 0 },
     { word: '蓁', type: 'abstract', color: 'from-emerald-50 to-green-50', accent: 'bg-emerald-500', level: 0 },
-  ];import React, { useState } from 'react';
+  ];import React, { useState, useEffect } from 'react';
 import { Volume2, Filter, RotateCw, CheckCircle } from 'lucide-react';
 
 const ChineseFlashcard = () => {
@@ -193,8 +193,23 @@ const ChineseFlashcard = () => {
   const [shuffledCards, setShuffledCards] = useState([]);
   const [filterLevel, setFilterLevel] = useState('all');
   const [studiedToday, setStudiedToday] = useState(new Set());
-  const [fontFamily, setFontFamily] = useState('default');
-  const [cardLevels, setCardLevels] = useState({});
+  const [fontFamily, setFontFamily] = useState(() => {
+    return localStorage.getItem('fontFamily') || 'default';
+  });
+  const [cardLevels, setCardLevels] = useState(() => {
+    const saved = localStorage.getItem('cardLevels');
+    return saved ? JSON.parse(saved) : {};
+  });
+  
+  // 保存字體設定到 localStorage
+  useEffect(() => {
+    localStorage.setItem('fontFamily', fontFamily);
+  }, [fontFamily]);
+  
+  // 保存熟悉度到 localStorage
+  useEffect(() => {
+    localStorage.setItem('cardLevels', JSON.stringify(cardLevels));
+  }, [cardLevels]);
   
   const allCards = [
     { word: '貓', type: 'image', image: '🐱', color: 'from-amber-50 to-orange-50', accent: 'bg-amber-500', level: 5 },

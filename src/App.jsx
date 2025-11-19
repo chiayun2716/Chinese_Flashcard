@@ -348,6 +348,57 @@ const ChineseFlashcard = () => {
     }
   };
 
+  // 壓縮圖片
+  const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.8) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // 計算新尺寸（保持比例）
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // 轉換為 Blob
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(new Error('圖片壓縮失敗'));
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => reject(new Error('圖片載入失敗'));
+      };
+      reader.onerror = () => reject(new Error('檔案讀取失敗'));
+    });
+  };
+
   // 上傳圖片
   const handleImageUpload = async (word, file) => {
     if (!user) {
@@ -362,8 +413,16 @@ const ChineseFlashcard = () => {
 
     setUploading(true);
     try {
+      // 壓縮圖片
+      const compressedBlob = await compressImage(file);
+      
+      // 顯示壓縮資訊
+      const originalSize = (file.size / 1024).toFixed(2);
+      const compressedSize = (compressedBlob.size / 1024).toFixed(2);
+      console.log(`原始大小: ${originalSize} KB → 壓縮後: ${compressedSize} KB`);
+
       const storageRef = ref(storage, `users/${user.uid}/images/${word}.jpg`);
-      await uploadBytes(storageRef, file);
+      await uploadBytes(storageRef, compressedBlob);
       const downloadURL = await getDownloadURL(storageRef);
 
       const newImages = { ...customImages, [word]: downloadURL };
@@ -372,7 +431,7 @@ const ChineseFlashcard = () => {
       await setDoc(doc(db, 'users', user.uid, 'data', 'customImages'), newImages);
 
       setShowImageUpload(false);
-      alert('圖片上傳成功！');
+      alert(`圖片上傳成功！\n原始: ${originalSize} KB\n壓縮後: ${compressedSize} KB`);
     } catch (error) {
       console.error('圖片上傳失敗:', error);
       alert('圖片上傳失敗，請稍後再試');
@@ -534,6 +593,12 @@ const ChineseFlashcard = () => {
     const card = shuffledCards[currentCard];
     const [selectedFile, setSelectedFile] = useState(null);
 
+    const formatFileSize = (bytes) => {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    };
+
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6" onClick={() => setShowImageUpload(false)}>
         <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -542,6 +607,15 @@ const ChineseFlashcard = () => {
             <button onClick={() => setShowImageUpload(false)} className="text-slate-400 hover:text-slate-600">
               <X size={24} />
             </button>
+          </div>
+
+          <div className="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="text-sm text-blue-800 font-medium mb-2">📸 圖片會自動優化</div>
+            <div className="text-xs text-blue-600">
+              • 自動壓縮至 800x800 像素<br/>
+              • 轉換為 JPEG 格式<br/>
+              • 大幅減少檔案大小
+            </div>
           </div>
 
           <input
@@ -553,7 +627,18 @@ const ChineseFlashcard = () => {
 
           {selectedFile && (
             <div className="mb-4">
-              <img src={URL.createObjectURL(selectedFile)} alt="預覽" className="w-full rounded-xl" />
+              <div className="bg-slate-50 rounded-xl p-3 mb-3">
+                <div className="text-sm text-slate-600">
+                  <span className="font-medium">檔案名稱：</span>{selectedFile.name}
+                </div>
+                <div className="text-sm text-slate-600">
+                  <span className="font-medium">原始大小：</span>{formatFileSize(selectedFile.size)}
+                </div>
+                <div className="text-xs text-green-600 mt-1">
+                  ✓ 上傳時會自動壓縮
+                </div>
+              </div>
+              <img src={URL.createObjectURL(selectedFile)} alt="預覽" className="w-full rounded-xl border-2 border-slate-200" />
             </div>
           )}
 
@@ -569,7 +654,7 @@ const ChineseFlashcard = () => {
               disabled={!selectedFile || uploading}
               className="flex-1 bg-blue-500 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {uploading ? '上傳中...' : '確認上傳'}
+              {uploading ? '壓縮並上傳中...' : '確認上傳'}
             </button>
           </div>
         </div>

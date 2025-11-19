@@ -921,11 +921,22 @@ const ChineseFlashcard = () => {
   const LevelCardsModal = () => {
     if (showLevelCards === null) return null;
     
+    const [selectedCard, setSelectedCard] = useState(null);
     const levelCards = allCards.filter(card => getCardLevel(card.word) === showLevelCards);
+    
+    const handleCardClick = (card) => {
+      setSelectedCard(card);
+    };
+
+    const handleLevelChange = async (word, newLevel) => {
+      await saveCardLevel(word, newLevel);
+      setSelectedCard(null);
+      // 不關閉主 Modal，讓使用者可以繼續調整其他字卡
+    };
     
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 overflow-y-auto" onClick={() => setShowLevelCards(null)}>
-        <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-white rounded-3xl p-8 max-w-3xl w-full shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-2xl font-bold text-slate-800">Level {showLevelCards} 字卡清單</h3>
             <button onClick={() => setShowLevelCards(null)} className="text-slate-400 hover:text-slate-600">
@@ -936,32 +947,28 @@ const ChineseFlashcard = () => {
           <div className="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
             <div className="text-sm text-blue-800">
               <span className="font-bold">共 {levelCards.length} 張字卡</span>
+              <span className="ml-4 text-xs">💡 點擊字卡可調整熟悉度</span>
             </div>
           </div>
 
           {levelCards.length > 0 ? (
             <div className="max-h-96 overflow-y-auto">
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-6 gap-3">
                 {levelCards.map((card) => (
-                  <div key={card.word} className={`bg-gradient-to-br ${card.color} rounded-xl p-4 text-center border-2 border-white shadow-lg hover:shadow-xl transition-all hover:scale-105 cursor-pointer`}>
-                    <div className="text-4xl font-black text-slate-800 mb-1" style={card.type === 'abstract' ? getFontStyle() : {}}>
-                      {card.type === 'image' && card.image ? (
-                        customImages[card.word] ? (
-                          <img src={customImages[card.word]} alt={card.word} className="w-full h-16 object-contain mb-2" />
-                        ) : (
-                          <div className="text-5xl">{card.image}</div>
-                        )
-                      ) : (
-                        card.word
-                      )}
+                  <button
+                    key={card.word}
+                    onClick={() => handleCardClick(card)}
+                    className={`bg-gradient-to-br ${card.color} rounded-xl p-4 text-center border-2 border-white shadow-lg hover:shadow-xl transition-all hover:scale-110 cursor-pointer relative`}
+                  >
+                    <div className="text-4xl font-black text-slate-800" style={getFontStyle()}>
+                      {card.word}
                     </div>
-                    {card.type === 'abstract' && (
-                      <div className="text-2xl font-bold text-slate-700">{card.word}</div>
-                    )}
                     {card.custom && (
-                      <div className="text-xs text-purple-600 font-bold mt-1">自訂</div>
+                      <div className="absolute top-1 right-1 text-xs text-purple-600 font-bold bg-white/80 px-1 rounded">
+                        自訂
+                      </div>
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -989,6 +996,57 @@ const ChineseFlashcard = () => {
             </button>
           </div>
         </div>
+
+        {/* 字卡詳細編輯 Modal */}
+        {selectedCard && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={() => setSelectedCard(null)}>
+            <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl mx-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-slate-800">調整熟悉度</h3>
+                <button onClick={() => setSelectedCard(null)} className="text-slate-400 hover:text-slate-600">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className={`bg-gradient-to-br ${selectedCard.color} rounded-2xl p-8 text-center mb-6`}>
+                <div className="text-7xl font-black text-slate-800" style={getFontStyle()}>
+                  {selectedCard.word}
+                </div>
+                {selectedCard.custom && (
+                  <div className="text-sm text-purple-600 font-bold mt-2">自訂字卡</div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <div className="text-sm font-semibold text-slate-700 mb-3 text-center">
+                  目前熟悉度：Level {getCardLevel(selectedCard.word)}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[0, 1, 2, 3, 4, 5].map(level => (
+                    <button
+                      key={level}
+                      onClick={() => handleLevelChange(selectedCard.word, level)}
+                      className={`py-3 px-4 rounded-xl font-bold transition-all ${
+                        getCardLevel(selectedCard.word) === level
+                          ? 'bg-rose-500 text-white shadow-lg scale-105'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      Level {level}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedCard(null)}
+                className="w-full bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl hover:bg-slate-300 transition-all"
+              >
+                關閉
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
